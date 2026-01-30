@@ -20,29 +20,55 @@ def setup():
     os.system('echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list > /dev/null')
     os.system("sudo apt update > /dev/null && sudo apt install ngrok -y > /dev/null")
 
-    print("\n3. Starting Ollama Server...")
-    os.environ['OLLAMA_HOST'] = '0.0.0.0'  # Allow external connections
-    os.environ['OLLAMA_ORIGINS'] = '*'     # CORS for all origins
-    os.environ['OLLAMA_NUM_GPU'] = '2'
+    print("\n🔍 Checking Available GPUs...")
+    gpu_check = subprocess.getoutput("nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader")
+    print(gpu_check)
+    
+    print("\n3. Starting Ollama Server with Multi-GPU Support...")
+    os.environ['OLLAMA_HOST'] = '0.0.0.0'
+    os.environ['OLLAMA_ORIGINS'] = '*'
+    
+    # Multi-GPU Configuration
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Make both GPUs visible
+    os.environ['OLLAMA_NUM_GPU'] = '2'          # Use 2 GPUs
+    os.environ['OLLAMA_MAX_LOADED_MODELS'] = '1'  # Load 1 model across GPUs
+    
+    # Performance tuning for T4s
+    os.environ['OLLAMA_NUM_PARALLEL'] = '2'     # Parallel requests
+    os.environ['OLLAMA_MAX_QUEUE'] = '512'      # Request queue size
+    
     os.system("pkill -9 ollama || true")
+    time.sleep(2)
+    
+    # Start Ollama with explicit logging
     os.system("nohup ollama serve > ollama.log 2>&1 &")
     
     # Wait for Ollama to start
     print("Waiting for Ollama to wake up...")
-    for _ in range(10):
+    for i in range(15):
         if "127.0.0.1:11434" in subprocess.getoutput("netstat -tuln"):
             print("✅ Ollama is listening.")
             break
         time.sleep(2)
-
+        if i % 3 == 0:
+            print(f"   Still waiting... ({i*2}s)")
+    
     print("\n4. Checking Model: gpt-oss:20b")
     models = subprocess.getoutput("ollama list")
     if "gpt-oss:20b" not in models:
         print("Model not found. Pulling now (this takes time)...")
-        os.system("ollama pull gpt-oss:20b")  # ~12GB download
+        os.system("ollama pull gpt-oss:20b")
     else:
         print("✅ Model already exists.")
-
+    
+    # Preload model to verify GPU usage
+    print("\n📊 Preloading model to verify GPU distribution...")
+    os.system('curl -s http://localhost:11434/api/generate -d \'{"model":"gpt-oss:20b","prompt":"test","stream":false}\' > /dev/null &')
+    time.sleep(5)
+    
+    print("\n🖥️  GPU Memory Usage After Model Load:")
+    os.system("nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv")
+    
     print("\n5. Starting Ngrok Tunnel...")
     hashed_pass = hashlib.sha256(raw_pass.encode()).hexdigest()
     os.system("pkill -9 ngrok || true")
@@ -54,25 +80,31 @@ def setup():
     for _ in range(30):
         time.sleep(2)
         url = subprocess.getoutput("curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url'")
-        if url and url != "null": break
+        if url and url != "null": 
+            break
             
     if not url or url == "null":
         print("❌ Ngrok Error. Check ngrok.log")
         return
 
-    print("\n" + "="*50)
-    print(f"🚀 SERVER LIVE")
+    print("\n" + "="*60)
+    print(f"🚀 SERVER LIVE - DUAL GPU MODE")
     print(f"MODEL: gpt-oss:20b")
     print(f"URL:   {url}")
-    print("="*50)
-    print(f'\n# Copy dòng này để chạy trên Windows PowerShell:')
+    print("="*60)
+    print(f'\n# Copy this line to run on Windows PowerShell:')
     print(f'$env:OLLAMA_HOST="{url}"; $env:OLLAMA_USERNAME="{user}"; $env:OLLAMA_PASSWORD="{hashed_pass}"; python chat.py')
-    print("="*50)
-
-    # Keep alive
+    print("="*60)
+    
+    # Monitoring loop
+    print("\n📡 Server is running. Monitoring GPU usage every 10 minutes...")
+    iteration = 0
     while True:
-        time.sleep(600)
-        print(f"Heartbeat: {time.strftime('%H:%M:%S')}")
+        time.sleep(600)  # 10 minutes
+        iteration += 1
+        print(f"\n[Heartbeat #{iteration}] {time.strftime('%H:%M:%S')}")
+        print("GPU Status:")
+        os.system("nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv,noheader,nounits")
 
 if __name__ == "__main__":
     setup()

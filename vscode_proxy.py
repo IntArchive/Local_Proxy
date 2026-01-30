@@ -2,52 +2,74 @@ from flask import Flask, request, Response, stream_with_context
 import requests
 import os
 import json
+import time
 
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
-# Thay bằng URL Ngrok từ Colab output
 REMOTE_URL = os.getenv("OLLAMA_HOST", "https://your-ngrok-url.ngrok-free.app")
 OLLAMA_USER = os.getenv("OLLAMA_USERNAME", "admin")
 OLLAMA_PASS = os.getenv("OLLAMA_PASSWORD", "your-hashed-password-here")
 
-# Headers để bypass ngrok browser warning
+# Headers to bypass ngrok browser warning
 HEADERS = {
     "ngrok-skip-browser-warning": "true",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 AUTH = (OLLAMA_USER, OLLAMA_PASS)
 
+# Request counter for monitoring
+request_count = 0
+
 @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def proxy(path):
+    global request_count
+    request_count += 1
+    
     url = f"{REMOTE_URL}/{path}"
     method = request.method
     params = request.args
     
-    print(f"DEBUG: Proxying {method} to {url}")
+    print(f"\n[Request #{request_count}] {method} → {path}")
 
     try:
-        # Parse và modify request payload
+        # Parse request payload
         payload = request.get_json(force=True, silent=True) or {}
         
-        # LOGGING: Ghi log request để debug
+        # LOGGING: Track all requests for debugging
         with open("vscode_requests.log", "a", encoding="utf-8") as log_file:
-            log_file.write(f"\n--- REQUEST ({method}) ---\n")
-            log_file.write(json.dumps(payload, indent=2))
-            log_file.write("\n-------------------------\n")
+            log_file.write(f"\n{'='*60}\n")
+            log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Request #{request_count}\n")
+            log_file.write(f"Method: {method} | Path: {path}\n")
+            log_file.write(f"Payload:\n{json.dumps(payload, indent=2)}\n")
+            log_file.write(f"{'='*60}\n")
         
-        # FORCE MODEL: Luôn dùng gpt-oss:20b
-        print(f"🛠️ Forcing Model: gpt-oss:20b")
-        payload["model"] = "gpt-oss:20b"
-
-        # CONTEXT INJECTION: Tối ưu memory
+        # FORCE MODEL: Always use gpt-oss:20b
+        if payload:
+            original_model = payload.get("model", "not specified")
+            payload["model"] = "gpt-oss:20b"
+            print(f"   Model: {original_model} → gpt-oss:20b")
+        
+        # OPTIMIZATION: Multi-GPU friendly settings
         if "options" not in payload:
             payload["options"] = {}
-        payload["options"]["num_ctx"] = 2048      # Context window
-        payload["options"]["num_predict"] = -1    # Unlimited generation
-        payload["num_ctx"] = 8192                 # Fallback top-level
         
-        # Forward request với authentication
+        # Performance tuning for dual T4 setup
+        payload["options"].update({
+            "num_ctx": 4096,          # Context window (balanced for 2x T4)
+            "num_predict": -1,        # Unlimited generation
+            "num_thread": 8,          # CPU threads for preprocessing
+            "num_gpu": 2,             # Explicit GPU count
+            "num_batch": 512,         # Batch size for parallel processing
+        })
+        
+        # Fallback top-level settings
+        payload["num_ctx"] = 4096
+        
+        print(f"   GPU Config: num_gpu=2, num_ctx=4096, num_batch=512")
+        
+        # Forward request with authentication
+        start_time = time.time()
         resp = requests.request(
             method=method,
             url=url,
@@ -56,29 +78,69 @@ def proxy(path):
             params=params,
             auth=AUTH,
             stream=True,
-            timeout=300
+            timeout=600  # Increased timeout for large responses
         )
-
-        # Loại bỏ hop-by-hop headers
+        
+        # Remove hop-by-hop headers
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
         headers = [(name, value) for (name, value) in resp.raw.headers.items()
                    if name.lower() not in excluded_headers]
-
+        
+        # Stream response with timing info
+        def generate():
+            chunk_count = 0
+            for chunk in resp.iter_content(chunk_size=1024):
+                chunk_count += 1
+                yield chunk
+            elapsed = time.time() - start_time
+            print(f"   ✅ Completed in {elapsed:.2f}s ({chunk_count} chunks)")
+        
         return Response(
-            stream_with_context(resp.iter_content(chunk_size=1024)), 
+            stream_with_context(generate()), 
             status=resp.status_code, 
             headers=headers
         )
 
+    except requests.exceptions.Timeout:
+        error_msg = "Request timeout - model may be overloaded or response too long"
+        print(f"   ❌ {error_msg}")
+        return Response(json.dumps({"error": error_msg}), status=504)
+    
+    except requests.exceptions.ConnectionError as e:
+        error_msg = f"Connection error - check if Ollama server is running: {str(e)}"
+        print(f"   ❌ {error_msg}")
+        return Response(json.dumps({"error": error_msg}), status=503)
+    
     except Exception as e:
-        print(f"ERROR: {e}")
-        return Response(json.dumps({"error": str(e)}), status=500)
+        error_msg = f"Proxy error: {str(e)}"
+        print(f"   ❌ {error_msg}")
+        return Response(json.dumps({"error": error_msg}), status=500)
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    try:
+        resp = requests.get(f"{REMOTE_URL}/api/tags", headers=HEADERS, auth=AUTH, timeout=5)
+        return {
+            "status": "healthy",
+            "remote_url": REMOTE_URL,
+            "requests_served": request_count,
+            "remote_status": resp.status_code
+        }
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}, 503
 
 if __name__ == '__main__':
-    print("🚀 VS Code → Ollama Proxy Running")
-    print(f"Targeting: {REMOTE_URL}")
-    print("━" * 50)
-    print("📝 Trong VSCode Continue, set API Base URL:")
-    print("   http://localhost:11435")
-    print("━" * 50)
-    app.run(port=11435, threaded=True)
+    print("\n" + "="*60)
+    print("🚀 VS Code → Ollama Proxy (Multi-GPU Optimized)")
+    print(f"📡 Targeting: {REMOTE_URL}")
+    print("="*60)
+    print("\n📝 Setup Instructions:")
+    print("   1. In VS Code, install 'Continue' extension")
+    print("   2. Open Continue settings (JSON)")
+    print("   3. Set API Base URL to: http://localhost:11435")
+    print("   4. Model will auto-use: gpt-oss:20b on dual T4s")
+    print("\n💡 Health check: http://localhost:11435/health")
+    print("="*60 + "\n")
+    
+    app.run(host='0.0.0.0', port=11435, threaded=True, debug=False)
