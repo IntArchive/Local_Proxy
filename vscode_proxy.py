@@ -60,7 +60,7 @@ def proxy(path):
             "num_predict": -1,        # Unlimited generation
             "num_thread": 2,          # CPU threads for preprocessing
             "num_gpu": 2,             # Explicit GPU count
-            "num_batch": 64,         # Batch size for parallel processing
+            "num_batch": 4,         # Batch size for parallel processing
         })
         
         # Fallback top-level settings
