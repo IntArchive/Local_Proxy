@@ -50,23 +50,23 @@ def proxy(path):
             payload["model"] = "gpt-oss:20b"
             print(f"   Model: {original_model} → gpt-oss:20b")
         
-        # OPTIMIZATION: Multi-GPU friendly settings
+        # OPTIMIZATION: Multi-GPU friendly settings for Kaggle T4s
         if "options" not in payload:
             payload["options"] = {}
         
-        # Performance tuning for dual T4 setup
+        # Reduced settings to fit in 2x T4 (15GB each) with low system RAM
         payload["options"].update({
-            "num_ctx": 128,          # Context window (balanced for 2x T4)
+            "num_ctx": 2048,          # Reduced context (was 4096) to avoid system RAM
             "num_predict": -1,        # Unlimited generation
-            "num_thread": 2,          # CPU threads for preprocessing
+            "num_thread": 4,          # Lower CPU threads (Kaggle has limited RAM)
             "num_gpu": 2,             # Explicit GPU count
-            "num_batch": 4,         # Batch size for parallel processing
+            "num_batch": 256,         # Reduced batch size to save memory
         })
         
         # Fallback top-level settings
-        payload["num_ctx"] = 128
+        payload["num_ctx"] = 2048
         
-        print(f"   GPU Config: num_gpu=2, num_ctx=8192, num_batch=64")
+        print(f"   GPU Config: num_gpu=2, num_ctx=2048, num_batch=256 (RAM-optimized)")
         
         # Forward request with authentication
         start_time = time.time()

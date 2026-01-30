@@ -33,6 +33,10 @@ def setup():
     os.environ['OLLAMA_NUM_GPU'] = '2'          # Use 2 GPUs
     os.environ['OLLAMA_MAX_LOADED_MODELS'] = '1'  # Load 1 model across GPUs
     
+    # CRITICAL: Force 100% GPU usage, 0% system RAM
+    os.environ['OLLAMA_GPU_OVERHEAD'] = '0'     # No GPU memory reserved for overhead
+    os.environ['OLLAMA_MAX_VRAM'] = '30000'     # Use full 30GB VRAM (2x15GB T4s)
+    
     # Performance tuning for T4s
     os.environ['OLLAMA_NUM_PARALLEL'] = '2'     # Parallel requests
     os.environ['OLLAMA_MAX_QUEUE'] = '512'      # Request queue size
@@ -61,10 +65,20 @@ def setup():
     else:
         print("✅ Model already exists.")
     
-    # Preload model to verify GPU usage
-    print("\n📊 Preloading model to verify GPU distribution...")
-    os.system('curl -s http://localhost:11434/api/generate -d \'{"model":"gpt-oss:20b","prompt":"test","stream":false}\' > /dev/null &')
-    time.sleep(5)
+    # Preload model with GPU-only settings to verify it fits
+    print("\n📊 Preloading model with GPU-only mode (reduced context)...")
+    preload_cmd = '''curl -s http://localhost:11434/api/generate -d '{
+        "model":"gpt-oss:20b",
+        "prompt":"test",
+        "stream":false,
+        "options": {
+            "num_ctx": 2048,
+            "num_gpu": 2,
+            "num_thread": 4
+        }
+    }' > /dev/null 2>&1 &'''
+    os.system(preload_cmd)
+    time.sleep(8)
     
     print("\n🖥️  GPU Memory Usage After Model Load:")
     os.system("nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv")
