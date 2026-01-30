@@ -23,6 +23,7 @@ def setup():
     print("\n3. Starting Ollama Server...")
     os.environ['OLLAMA_HOST'] = '0.0.0.0'  # Allow external connections
     os.environ['OLLAMA_ORIGINS'] = '*'     # CORS for all origins
+    os.environ['OLLAMA_NUM_GPU'] = '2'
     os.system("pkill -9 ollama || true")
     os.system("nohup ollama serve > ollama.log 2>&1 &")
     
