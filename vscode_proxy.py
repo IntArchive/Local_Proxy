@@ -56,7 +56,7 @@ def proxy(path):
         
         # Performance tuning for dual T4 setup
         payload["options"].update({
-            "num_ctx": 4096,          # Context window (balanced for 2x T4)
+            "num_ctx": 8192,          # Context window (balanced for 2x T4)
             "num_predict": -1,        # Unlimited generation
             "num_thread": 8,          # CPU threads for preprocessing
             "num_gpu": 2,             # Explicit GPU count
@@ -64,9 +64,9 @@ def proxy(path):
         })
         
         # Fallback top-level settings
-        payload["num_ctx"] = 4096
+        payload["num_ctx"] = 8192
         
-        print(f"   GPU Config: num_gpu=2, num_ctx=4096, num_batch=512")
+        print(f"   GPU Config: num_gpu=2, num_ctx=8192, num_batch=512")
         
         # Forward request with authentication
         start_time = time.time()
