@@ -58,15 +58,15 @@ def proxy(path):
         payload["options"].update({
             "num_ctx": 8192,          # Context window (balanced for 2x T4)
             "num_predict": -1,        # Unlimited generation
-            "num_thread": 8,          # CPU threads for preprocessing
+            "num_thread": 2,          # CPU threads for preprocessing
             "num_gpu": 2,             # Explicit GPU count
-            "num_batch": 512,         # Batch size for parallel processing
+            "num_batch": 64,         # Batch size for parallel processing
         })
         
         # Fallback top-level settings
         payload["num_ctx"] = 8192
         
-        print(f"   GPU Config: num_gpu=2, num_ctx=8192, num_batch=512")
+        print(f"   GPU Config: num_gpu=2, num_ctx=8192, num_batch=64")
         
         # Forward request with authentication
         start_time = time.time()
