@@ -56,15 +56,15 @@ def proxy(path):
         
         # Reduced settings to fit in 2x T4 (15GB each) with low system RAM
         payload["options"].update({
-            "num_ctx": 2048,          # Reduced context (was 4096) to avoid system RAM
+            "num_ctx": 128,          # Reduced context (was 4096) to avoid system RAM
             "num_predict": -1,        # Unlimited generation
             "num_thread": 4,          # Lower CPU threads (Kaggle has limited RAM)
             "num_gpu": 2,             # Explicit GPU count
-            "num_batch": 256,         # Reduced batch size to save memory
+            "num_batch": 2,         # Reduced batch size to save memory
         })
         
         # Fallback top-level settings
-        payload["num_ctx"] = 2048
+        payload["num_ctx"] = 128
         
         print(f"   GPU Config: num_gpu=2, num_ctx=2048, num_batch=256 (RAM-optimized)")
         
